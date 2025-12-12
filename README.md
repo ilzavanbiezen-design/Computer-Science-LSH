@@ -10,21 +10,21 @@ Products are represented using a combination of:
 MinHash signatures are constructed to approximate Jaccard similarity, after which LSH is used to significantly reduce the number of comparisons. Duplicate products are identified using a clustering-based approach with union–find.
 
 The entire implementation is contained in a single Python file:
-Data structures and preprocessing:
-- Product data class
-- JSON data loading
-- Text normalization and feature extraction
-- Token construction and IDF computation
-MinHash and LSH:
-- Custom MinHash signature generation
-- Banding and bucketing for LSH
-- Candidate pair generation based on signature similarity
-Duplicate detection and evaluation:
-- Similarity computation using (weighted) Jaccard similarity
-- Hard filtering based on brand, size, and resolution
-- Clustering using union–find
-- Evaluation using pair quality, pair completeness, F1*, precision, recall, and F1-score
-- Bootstrapping for robust evaluation
+- Data structures and preprocessing:
+    - Product data class
+    - JSON data loading
+    - Text normalization and feature extraction
+    - Token construction and IDF computation
+- MinHash and LSH:
+    - Custom MinHash signature generation
+    - Banding and bucketing for LSH
+    - Candidate pair generation based on signature similarity
+- Duplicate detection and evaluation:
+    - Similarity computation using (weighted) Jaccard similarity
+    - Hard filtering based on brand, size, and resolution
+    - Clustering using union–find
+    - Evaluation using pair quality, pair completeness, F1*, precision, recall, and F1-score
+    - Bootstrapping for robust evaluation
 
 All functions are defined first. The actual execution of the pipeline only starts when the script is run directly.
 
