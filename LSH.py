@@ -21,18 +21,16 @@ class Product:
     pid: int
     shop: str
     title: str
-    model_id: str              # gold label (evaluation only)
+    model_id: str              # for evaluation only
     features: Dict[str, Any]
     tokens: Set[str] = field(default_factory=set)
-    model_tokens: Set[str] = field(default_factory=set)
-    title_tokens: Set[str] = field(default_factory=set)
 
-    # normalized fields extracted later
+    # normalized fields 
     brand: str = ""
     size_inch: float | None = None
     resolution: str | None = None
 
-    # MinHash signature (to be filled later)
+    # MinHash signature
     signature: List[int] | None = None
 
 
@@ -56,18 +54,12 @@ def load_products_from_json(json_path: str) -> List[Product]:
                 pid=pid,
                 shop=shop,
                 title=title,
-                model_id=model_id,  # DO NOT use in matching
+                model_id=model_id, 
                 features=features
             ))
             pid += 1
 
     return products
-
-# Load the data
-#json_path = "/Users/ilzav/Downloads/TVs-all-merged/TVs-all-merged.json"
-#print("Loading data from JSON...")
-#products = load_products_from_json(json_path)
-#print(f"Loaded {len(products)} product offers.")
 
 def normalize_text(s: str) -> str:
     s = s.lower()
@@ -75,39 +67,12 @@ def normalize_text(s: str) -> str:
     s = re.sub(r'\s+', ' ', s).strip()
     return s
 
-IMPORTANT_TECH_WORDS = {"led", "lcd", "plasma", "hdtv", "uhd", "smart", "3d", "oled"}
-def extract_informative_title_tokens(title: str, brand: str | None = None) -> set[str]:
-    title_lower = title.lower().replace('"', ' ').replace("'", " ")
-    raw_tokens = re.split(r'[^a-z0-9]+', title_lower)
-
-    tokens: set[str] = set()
-    for w in raw_tokens:
-        if not w:
-            continue
-
-        # model-like: letters AND digits, length >= 3
-        if re.search(r'[a-z]', w) and re.search(r'\d', w) and len(w) >= 3:
-            tokens.add(w)
-            continue
-
-        # tech words
-        if w in IMPORTANT_TECH_WORDS:
-            tokens.add(w)
-            continue
-
-        # brand from title if matches
-        if brand and w == brand.lower():
-            tokens.add(f"brand={brand.lower()}")
-            continue
-
-    return tokens
-
 def extract_char_trigrams(title: str) -> set[str]:
     """
     Return a set of character 3-grams from a normalized title.
     E.g. "samsung 46 inch" -> {"sam", "ams", "msu", ...}
     """
-    norm = normalize_text(title)       # already in your code
+    norm = normalize_text(title)       
     norm = norm.replace(" ", "_")      # keep word boundaries but as a char
     grams: set[str] = set()
     for i in range(len(norm) - 2):
@@ -166,7 +131,7 @@ def init_stop_trigrams(products: List[Product], df_ratio: float) -> None:
 def build_tokens_for_product(p: Product, brand_lexicon: set[str]) -> None:
     tokens: Set[str] = set()
 
-    # --- NORMALIZED FEATURES (as you already do) ---
+    # --- NORMALIZED FEATURES ---
     brand = parse_brand(p.features)
     title_brand = parse_brand_from_title(p.title, brand_lexicon)
     if not brand and title_brand:
@@ -180,33 +145,29 @@ def build_tokens_for_product(p: Product, brand_lexicon: set[str]) -> None:
     p.size_inch = size_inch
     p.resolution = resolution
 
-    # --- TITLE TOKENS: NOW CHAR TRIGRAMS, NOT MODEL WORDS ---
-    core_title = extract_core_title(p.title, brand)
-    title_3grams = extract_char_trigrams(core_title)
+    # Extract q-grams from the title
+    title_3grams = extract_char_trigrams(p.title)
     tokens |= title_3grams
 
-    title_tokens = extract_informative_title_tokens(p.title)
-    p.title_tokens = title_tokens
-
-    # --- FEATURE TOKENS (keep these, they’re good and different from prior work) ---
     if brand:
         tokens.add(f"{brand.lower()}")
     if size_inch is not None:
         tokens.add(f"{round(size_inch)}in")
     if resolution:
         tokens.add(f"{resolution}")
-
-    # UPC etc.
     upc = p.features.get("UPC") or p.features.get("Upc") or p.features.get("upc")
     if upc:
         upc_norm = re.sub(r'\D+', '', str(upc))
         if upc_norm:
             tokens.add(f"upc={upc_norm}")
 
-    #p.model_tokens = extract_model_tokens(p.title)
     p.tokens = tokens
 
 def build_brand_lexicon(products: List[Product]) -> set[str]:
+    """
+    Collects all brands found in the set of TVs such that I can later
+    try to find brand names in titles even if the brand name does not occur in the features map
+    """
     brands = set()
     for p in products:
         b = parse_brand(p.features)
@@ -278,16 +239,6 @@ def build_tokens_for_all(products: List[Product], brand_lexicon: set[str]) -> No
     for p in products:
         build_tokens_for_product(p, brand_lexicon)
 
-def extract_core_title(title: str, brand: str | None) -> str:
-    norm = title.lower()
-    if brand:
-        idx = norm.find(brand.lower())
-        if idx != -1:
-            return title[idx:]  # keep original casing, from brand onwards
-    # fallback: if no brand or not found, maybe strip prefix up to first colon
-    if ':' in title:
-        return title.split(':', 1)[1]
-    return title
 #---------------------MinHashing---------------------
 
 def create_hash_functions(num_hashes: int, max_hash: int) -> List[tuple[int, int]]:
@@ -295,7 +246,6 @@ def create_hash_functions(num_hashes: int, max_hash: int) -> List[tuple[int, int
     Create 'num_hashes' random linear hash functions of the form:
     h(x) = (a * x + b) mod max_hash
     """
-    # random.seed(42)  # for reproducibility
     funcs: List[tuple[int, int]] = []
     for _ in range(num_hashes):
         a = random.randrange(1, max_hash)
@@ -349,8 +299,7 @@ def compute_true_duplicate_groups(products: List[Product]) -> List[List[int]]:
     """
     Gold *groups* of duplicates based on model_id.
     Each group is a list of product indices that share the same model_id.
-    We only keep groups that involve at least two different shops
-    (to mirror your original cross-shop pair definition).
+    We only keep groups that involve at different shops.
     """
     by_model: Dict[str, List[int]] = defaultdict(list)
 
@@ -373,8 +322,7 @@ def compute_true_duplicate_groups(products: List[Product]) -> List[List[int]]:
 
 def compute_true_duplicate_pairs(products: List[Product]) -> Set[Tuple[int, int]]:
     """
-    Backwards-compatible: derive pair-level gold from gold groups.
-    Only include cross-shop pairs (same logic as before).
+    Derive pairs from the clusters
     """
     gold_groups = compute_true_duplicate_groups(products)
     true_dup_pairs: Set[Tuple[int, int]] = set()
@@ -401,8 +349,6 @@ def get_b_r_for_threshold(n: int, target_t: float) -> Tuple[int, int, float]:
     Find integers (b, r) such that:
       - n = b * r
       - t_hat = (1 / b) ** (1 / r) is as close as possible to target_t
-
-    Returns (b, r, t_hat).
     """
     if not (0.0 < target_t < 1.0):
         raise ValueError("target_t must be in (0,1)")
@@ -431,8 +377,6 @@ def lsh_candidate_pairs_br(products: List[Product],
                            only_cross_shop: bool = True) -> Set[Tuple[int, int]]:
     """
     LSH with b bands, r rows per band.
-    - bands = b
-    - rows_per_band = r
     Signature length n must satisfy: n = bands * rows_per_band.
     Returns pairs of (i, j) where i,j are indices in `products`.
     """
@@ -516,35 +460,6 @@ def signature_similarity(sig1: List[int], sig2: List[int]) -> float:
     matches = sum(1 for a, b in zip(sig1, sig2) if a == b)
     return matches / len(sig1)
 
-def get_same_model_pairs(products: List[Product], max_pairs: int = 5) -> List[tuple[int, int]]:
-    """
-    Return up to max_pairs pairs (i, j) where model_id is the same
-    and shop is different (likely true duplicates).
-    """
-    pairs: List[tuple[int, int]] = []
-    n = len(products)
-    for i, j in combinations(range(n), 2):
-        if products[i].model_id == products[j].model_id and products[i].shop != products[j].shop:
-            pairs.append((i, j))
-            if len(pairs) >= max_pairs:
-                break
-    return pairs
-
-
-def get_different_model_pairs(products: List[Product], max_pairs: int = 5) -> List[tuple[int, int]]:
-    """
-    Return up to max_pairs pairs (i, j) where model_id is different
-    and shop is different (likely non-duplicates).
-    """
-    pairs: List[tuple[int, int]] = []
-    n = len(products)
-    for i, j in combinations(range(n), 2):
-        if products[i].model_id != products[j].model_id and products[i].shop != products[j].shop:
-            pairs.append((i, j))
-            if len(pairs) >= max_pairs:
-                break
-    return pairs
-
 def is_duplicate(p1: Product, p2: Product, theta: float) -> bool:
     if not passes_hard_filters(p1, p2):
         return False
@@ -564,9 +479,6 @@ def cluster_duplicates_union_find(products: List[Product],
       - For every LSH candidate pair (i, j), compute similarity via is_duplicate.
       - If is_duplicate(products[i], products[j], theta) is True, we connect i and j.
       - Clusters are the connected components under these edges.
-
-    Returns:
-        A list of clusters, each cluster is a list of product indices (len >= 2).
     """
 
     n = len(products)
@@ -579,7 +491,7 @@ def cluster_duplicates_union_find(products: List[Product],
 
     def find(x: int) -> int:
         while parent[x] != x:
-            parent[x] = parent[parent[x]]  # path compression
+            parent[x] = parent[parent[x]] 
             x = parent[x]
         return x
 
@@ -595,14 +507,13 @@ def cluster_duplicates_union_find(products: List[Product],
             parent[rb] = ra
             rank[ra] += 1
 
-    # --- Add edges for "strong enough" pairs ---
+    # Add edges for strong pairs 
     for i, j in candidate_pairs:
-        # guard just in case indices are out of range
         if 0 <= i < n and 0 <= j < n:
             if is_duplicate(products[i], products[j], theta=theta):
                 union(i, j)
 
-    # --- Collect clusters by root representative ---
+    # Collect clusters by root representative
     clusters_by_root: Dict[int, List[int]] = defaultdict(list)
     for i in range(n):
         root = find(i)
@@ -632,44 +543,38 @@ def f1_score(precision: float, recall: float) -> float:
 def f1_star(pair_quality: float, pair_completeness: float) -> float:
     """
     F1* = harmonic mean of pair quality and pair completeness.
-    (blocking quality measure)
     """
     return (2 * pair_quality * pair_completeness /
             (pair_quality + pair_completeness)) if (pair_quality + pair_completeness) > 0 else 0.0
 
 def evaluate_baseline_cjs_all_pairs(products: List[Product], theta: float) -> Dict[str, float]:
     """
-    Baseline: constrained Jaccard on ALL cross-shop pairs (no blocking).
+    Baseline: constrained Jaccard on ALL cross-shop pairs
     Returns pair_quality, pair_completeness, F1_star, precision, recall, F1.
     """
     gold = compute_true_duplicate_pairs(products)
     n = len(products)
 
-    # --- 1) Candidate pairs = ALL cross-shop pairs ---
+    # Candidate pairs = all cross-shop pairs
     candidate_pairs: Set[tuple[int, int]] = set()
     for i, j in combinations(range(n), 2):
         if products[i].shop != products[j].shop:
             candidate_pairs.add((i, j))
 
-    # Blocking metrics (even though there's no blocking, you can still compute them)
+    # Blocking metrics 
     dup_in_candidates = candidate_pairs & gold
 
     pair_completeness = len(dup_in_candidates) / len(gold) if gold else 0.0
     pair_quality = len(dup_in_candidates) / len(candidate_pairs) if candidate_pairs else 0.0
     F1_star_val = f1_star(pair_quality, pair_completeness)
 
-    # For baseline (no blocking), pair_completeness should be 1.0,
-    # because we include ALL cross-shop pairs.
-    # pair_quality is just proportion of true duplicates among all cross-shop pairs.
-
-    # --- 2) Classification with CJS on all candidate pairs ---
+    # Classification with CJS on all candidate pairs
     predicted_pairs: Set[tuple[int, int]] = set()
     for i, j in candidate_pairs:
         if is_duplicate(products[i], products[j], theta=theta):
             predicted_pairs.add((i, j))
 
     print(len(predicted_pairs))
-    # --- 3) Classic precision / recall / F1 ---
     TP = len(predicted_pairs & gold)
     FP = len(predicted_pairs - gold)
     FN = len(gold - predicted_pairs)
@@ -696,13 +601,10 @@ def evaluate_lsh_cjs(products: List[Product],
                      rows_per_band: int,
                      theta: float = 0.7) -> Dict[str, float]:
     """
-    Evaluate LSH + CJS on a given product list (no bootstrapping here).
+    Evaluate LSH + CJS on a given product list
     - products: list of Product with tokens, brand/size/res, and signature filled
     - bands, rows_per_band: LSH banding parameters (b, r)
     - theta: Jaccard threshold for CJS
-
-    Returns a dict with pair_quality, pair_completeness, F1*, precision, recall, F1,
-    plus frac_comparisons and some counts.
     """
     n = len(products)
     if n < 2:
@@ -722,7 +624,7 @@ def evaluate_lsh_cjs(products: List[Product],
     gold = compute_true_duplicate_pairs(products)
     total_cross = count_cross_shop_pairs(products)
 
-    # 1) Blocking with LSH
+    # LSH
     candidate_pairs = lsh_candidate_pairs_br(
         products,
         bands=bands,
@@ -741,11 +643,11 @@ def evaluate_lsh_cjs(products: List[Product],
         if total_cross > 0 else 0.0
     )
 
-    # 2) Clustering-based prediction: build duplicate groups, then pairs
+    # Clustering-based prediction: build duplicate groups, then pairs
     clusters = cluster_duplicates_union_find(products, candidate_pairs, theta=theta)
     predicted_pairs = clusters_to_pairs(clusters)
 
-    # 3) Final precision/recall/F1 wrt gold
+    # Final precision/recall/F1 wrt gold
     TP = len(predicted_pairs & gold)
     FP = len(predicted_pairs - gold)
     FN = len(gold - predicted_pairs)
@@ -781,16 +683,13 @@ def bootstrap_for_threshold(products: List[Product],
     n_total = len(products)
     all_indices = list(range(n_total))
 
-    # Precompute brand_lexicon from full data (no model_id usage)
+    # Precompute brand_lexicon from full data
     brand_lexicon = build_brand_lexicon(products)
 
     bands, rows_per_band, t_hat = get_b_r_for_threshold(NUM_HASHES, target_t)
     print(f"t={target_t:.2f} -> bands={bands}, rows_per_band={rows_per_band}, t̂={t_hat:.4f}")
 
     metrics_list = []
-
-    best_F1 = 0
-    best_frac = 0
     for b in range(B):
         # 1) Bootstrap sample indices WITH replacement
         boot_indices = [random.randrange(n_total) for _ in range(n_total)]
@@ -828,10 +727,6 @@ def bootstrap_for_threshold(products: List[Product],
         )
         metrics_list.append(res)
 
-        if res["F1"] > best_F1:
-            best_F1 = res["F1"]
-            best_frac = res["frac_comparisons"]
-
         print(f"  Bootstrap {b+1}/{B}: test size={len(test_products)}, F1={res['F1']:.3f}, "
               f"PC={res['pair_completeness']:.3f}, PQ={res['pair_quality']:.6f}, "
               f"frac={res['frac_comparisons']:.5f}")
@@ -859,29 +754,26 @@ def bootstrap_for_threshold(products: List[Product],
 if __name__ == "__main__":
     json_path = r"/Users/ilzav/Downloads/TVs-all-merged/TVs-all-merged.json"
 
-    # ---- LOAD PRODUCTS (full set, used as population for bootstraps) ----
+    # Load data
     products = load_products_from_json(json_path)
     print(f"Loaded {len(products)} product records")
 
-     # NEW: compute STOP_TRIGRAMS before building tokens
+     # compute STOP_TRIGRAMS before building tokens
+     # = q-grams that are common across more than 60% of the products
     init_stop_trigrams(products, df_ratio=0.6)
     print(STOP_TRIGRAMS)
 
-    # ---- BUILD TOKENS ----
+    # find all the brands across products and compute IDF for all q-grams
     brand_lexicon = build_brand_lexicon(products)
-    build_tokens_for_all(products, brand_lexicon)
-
+    #build_tokens_for_all(products, brand_lexicon)
     df = compute_token_df(products)
     IDF = compute_token_idf(df, len(products))
 
-    print("Computing MinHash signatures...")
-    hash_funcs = build_minhash_signatures(products)
-    print("Done computing MinHash signatures.")
+    #print("Computing MinHash signatures...")
+    #hash_funcs = build_minhash_signatures(products)
+    #print("Done computing MinHash signatures."
 
-    # You don't strictly need to build tokens/signatures here, because
-    # bootstraps rebuild them for each test set. This is fine.
-
-    # ---- BASELINE on full data (optional, already done) ----
+    # baseline on full data
     for theta in [0.3, 0.35, 0.4, 0.45]:
         res = evaluate_baseline_cjs_all_pairs(products, theta=theta)
         print(f"\nBaseline CJS (all pairs) with theta={theta}")
@@ -895,11 +787,11 @@ if __name__ == "__main__":
         print(f"  Recall:             {res['recall']:.4f}")
         print(f"  F1:                 {res['F1']:.4f}")
 
-    # ---- BOOTSTRAP LSH + CJS over t = 0.05..0.95 ----
-    theta = 0.4  # Jaccard threshold for CJS
+    # bootstrap LSH + CJS over t = 0.05..0.95 
+    theta = 0.35  # Jaccard threshold for CJS
     B = 50        # number of bootstraps
 
-    t_values = [i / 100 for i in range(5, 100, 5)]  # 0.05, 0.10, ..., 0.95
+    t_values = [i / 100 for i in range(5, 100, 5)] 
     t_values.insert(0, 0.001) 
     lsh_results = []
 
@@ -925,7 +817,7 @@ if __name__ == "__main__":
     f1_values = [r["F1"] for r in results_sorted]
     f1_star_values = [r["F1_star"] for r in results_sorted]
 
-    # Figure 2: Pair Completeness vs Fraction of Comparisons
+    # Pair Completeness vs Fraction of Comparisons
     plt.plot(fractions, pc_values, color='black')
     plt.xlabel("Fraction of comparisons")
     plt.ylabel("Pair completeness")
@@ -934,7 +826,7 @@ if __name__ == "__main__":
     plt.xlim(-0.01, 1.0)
     plt.show()
 
-    # Figure 3: Pair Quality vs Fraction of Comparisons
+    # Pair Quality vs Fraction of Comparisons
     plt.plot(fractions, pq_values, color='black')
     plt.xlabel("Fraction of comparisons")
     plt.ylabel("Pair quality")
@@ -943,9 +835,9 @@ if __name__ == "__main__":
     plt.xlim(-0.01, 0.25)
     plt.show()
 
-    # Figure 4: F1 vs Fraction of Comparisons
+    # F1 vs Fraction of Comparisons
     plt.plot(fractions, f1_values, color='black')
-    plt.axhline(y=0.3126, color='red', linestyle='--', label='Baseline F1 = 0.3126')
+    plt.axhline(y=0.3724, color='red', linestyle='--', label='Baseline F1 = 0.3724')
     plt.xlabel("Fraction of comparisons")
     plt.ylabel("F1")
     plt.title("F1 vs Fraction of comparisons")
@@ -953,7 +845,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.show()
 
-    # Figure 5: F1 star vs Fraction of Comparisons
+    # F1 star vs Fraction of Comparisons
     plt.plot(fractions, f1_star_values, color='black')
     plt.xlabel("Fraction of comparisons")
     plt.ylabel("F1 star")
