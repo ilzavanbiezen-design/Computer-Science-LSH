@@ -463,10 +463,6 @@ def signature_similarity(sig1: List[int], sig2: List[int]) -> float:
 def is_duplicate(p1: Product, p2: Product, theta: float) -> bool:
     if not passes_hard_filters(p1, p2):
         return False
-    #if p1.model_tokens and p2.model_tokens:
-        if not (p1.model_tokens & p2.model_tokens):
-            return False
-    simTitle = jaccard(p1.title_tokens, p2.title_tokens)
     sim3Gram = jaccard(p1.tokens, p2.tokens)
     weightedSim = weighted_jaccard(p1.tokens, p2.tokens, IDF)
     return weightedSim >= theta
@@ -765,13 +761,9 @@ if __name__ == "__main__":
 
     # find all the brands across products and compute IDF for all q-grams
     brand_lexicon = build_brand_lexicon(products)
-    #build_tokens_for_all(products, brand_lexicon)
+    build_tokens_for_all(products, brand_lexicon)
     df = compute_token_df(products)
     IDF = compute_token_idf(df, len(products))
-
-    #print("Computing MinHash signatures...")
-    #hash_funcs = build_minhash_signatures(products)
-    #print("Done computing MinHash signatures."
 
     # baseline on full data
     for theta in [0.3, 0.35, 0.4, 0.45]:
