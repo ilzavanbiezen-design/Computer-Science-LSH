@@ -2,10 +2,39 @@
 
 This repository contains a Python implementation of a scalable product duplicate detection method for Web shop data, developed as part of an academic assignment on entity resolution. The goal of the project is to efficiently identify duplicate product offers across different online retailers while avoiding the computational cost of exhaustive pairwise comparison.
 
-The implementation focuses on television product data and follows a two-stage approach. First, products are represented using a combination of character-level and structured features. Titles are transformed into character 3-grams with high-frequency stop-grams removed, while additional tokens are extracted from commonly available attributes such as brand, screen size, resolution, and UPC codes. Inverse document frequency (IDF) weighting is applied to emphasize informative tokens and reduce the influence of frequent ones.
+The goal of this project is to identify duplicate television product offers across different Web shops. Since comparing all product pairs is computationally infeasible for large datasets, this implementation applies LSH as a blocking technique to efficiently generate candidate pairs. These candidates are then filtered using similarity measures and domain-specific constraints.
+Products are represented using a combination of:
+- Character 3-grams extracted from product titles
+- Structured attributes such as brand, screen size, resolution, and UPC codes
 
-In the second stage, MinHash signatures are constructed for each product to approximate Jaccard similarity between token sets. These signatures are used as input to a Locality-Sensitive Hashing (LSH) scheme that partitions the signatures into bands and rows, allowing only highly similar products to be considered as candidate pairs. The LSH parameters are automatically derived from a target similarity threshold, enabling systematic control over the trade-off between efficiency and recall.
+MinHash signatures are constructed to approximate Jaccard similarity, after which LSH is used to significantly reduce the number of comparisons. Duplicate products are identified using a clustering-based approach with union–find.
 
-Candidate pairs produced by LSH are then filtered using domain-specific constraints and a weighted Jaccard similarity measure. Duplicate products are identified through a union–find clustering approach, resulting in groups of matching product offers. The method is evaluated using both pair-level and clustering-based metrics, including pair quality, pair completeness, F1*, precision, recall, and F1-score. Bootstrapping is employed to ensure robust evaluation across multiple train–test splits.
+The entire implementation is contained in a single Python file:
+Data structures and preprocessing:
+- Product data class
+- JSON data loading
+- Text normalization and feature extraction
+- Token construction and IDF computation
+MinHash and LSH:
+- Custom MinHash signature generation
+- Banding and bucketing for LSH
+- Candidate pair generation based on signature similarity
+Duplicate detection and evaluation:
+- Similarity computation using (weighted) Jaccard similarity
+- Hard filtering based on brand, size, and resolution
+- Clustering using union–find
+- Evaluation using pair quality, pair completeness, F1*, precision, recall, and F1-score
+- Bootstrapping for robust evaluation
 
-Overall, this project demonstrates that LSH can dramatically reduce the number of comparisons required to detect duplicates, achieving high efficiency while maintaining reasonable effectiveness on real-world Web shop data.
+All functions are defined first. The actual execution of the pipeline only starts when the script is run directly.
+
+To run the code:
+- Download the data
+- Updata the data path in the main block
+- run: python LSH.py
+- When executed, the script:
+    - Loads and preprocesses the data
+    - Builds MinHash signatures
+    - Evaluates a baseline method using all pairwise comparisons
+    - Runs LSH-based duplicate detection with bootstrapping for multiple LSH thresholds
+    - Produces evaluation metrics and plots illustrating the trade-off between efficiency and effectiveness
